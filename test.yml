@@ -1,0 +1,8 @@
+- name: Test Pluralith Module
+  hosts: localhost
+  tasks:
+    - name: Run Pluralith
+      pluralith:
+        command: "YOUR COMMAND HERE" # See all available commands here https://docs.pluralith.com/docs/category/cli-commands
+        project_path: "YOUR PROJECT PATH HERE"
+      register: testout
