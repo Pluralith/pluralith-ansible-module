@@ -2,13 +2,25 @@
   hosts: localhost
   vars:
     variable_dict:
-      datalake_region: "eu-central-1"
-      datalake_zone_letter: "a"
+      var_1: "eu-central-1"
+      var_2: "a"
   tasks:
+    - name: Init Terraform and Pluralith
+      pluralith:
+        command: "init" # See all available commands at https://docs.pluralith.com/docs/category/cli-commands
+        api_key: "YOUR API KEY HERE"
+        project_id: "YOUR PROJECT ID HERE" # Sign up and create a project at https://app.pluralith.com
+        project_path: "YOUR PROJECT PATH HERE"
+        init_tf: true
+        tf_backend_config:
+          region: “us-west-1"
+          bucket: "test"
+          key: "ansible_test"
+          profile: "qa_env"
+      register: command_result
     - name: Run Pluralith
       pluralith:
-        command: "graph" # See all available commands here https://docs.pluralith.com/docs/category/cli-commands
-        terraform_vars: "{{ variable_dict }}"
+        command: "run" # See all available commands at https://docs.pluralith.com/docs/category/cli-commands
+        project_path: "YOUR PROJECT PATH HERE"
+        tf_vars: "{{ variable_dict }}"
       register: command_result
-    - debug:
-        var: command_result

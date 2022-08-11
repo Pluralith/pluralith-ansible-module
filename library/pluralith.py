@@ -18,29 +18,36 @@ options:
         description: Select the Pluralith CLI command you would like to run.
         required: true
         type: str
-    binary_path:
-        description: Path to the current Pluralith binary.
+    api_key:
+        description: Pluralith API key (found in the Pluralith dashboard).
+        required: false
+        type: str
+    project_id:
+        description: Pluralith project ID (found in the Pluralith dashboard).
         required: false
         type: str
     project_path:
         description: Path to the target Terraform project.
         required: true
         type: str
-    terraform_vars:
+    tf_vars:
         description: A group of key-values to override template variables or those in variables files.
         required: false
         type: dict
-    terraform_var_files:
+    tf_var_files:
         description: The path to a variables file for Terraform to fill into the TF configurations. This can accept a list of paths to multiple variables files.
         required: false
         type: list
         elements: path
-        aliases: [ 'variables_file' ]
-
-# Specify this value according to your collection
-# in format of namespace.collection.doc_fragment_name
-extends_documentation_fragment:
-    - my_namespace.my_collection.my_doc_fragment_name
+    tf_backend_config:
+        description: A group of key-values to provide at init stage to the -backend-config parameter.
+        required: false
+        type: dict
+    tf_backend_config_files:
+        description: The path to a configuration file to provide at init state to the -backend-config parameter. This can accept a list of paths to multiple configuration files.
+        required: false
+        type: list
+        elements: path
 
 author:
     - Daniel Putzer (@DanThePutzer)
@@ -48,41 +55,65 @@ author:
 
 EXAMPLES = r"""
 # Initialize a Pluralith project
-- name: Initialize a Pluralith project
+- name: Init Terraform and Pluralith
   my_namespace.my_collection.pluralith:
-    command: "init"
-    project_path: "~/Code/Pluralith/test-architecture/aws/datalake/application"
+    command: "init" # See all available commands at https://docs.pluralith.com/docs/category/cli-commands
+    api_key: "YOUR API KEY HERE"
+    project_id: "YOUR PROJECT ID HERE" # Sign up and create a project at https://app.pluralith.com
+    project_path: "YOUR PROJECT PATH HERE"
+    init_tf: true
+    tf_backend_config:
+        region: "VALUE"
+        bucket: "VALUE"
+        key: "VALUE"
+        profile: "VALUE"
 
-# Run Pluralith and generate a diagram
-- name: Generate a Pluralith diagram
+# Run Pluralith and generate a diagram (both terraform and pluralith need to be initialized beforehand)
+- name: Run Pluralith
   my_namespace.my_collection.pluralith:
-    command: "run" # See all available commands here https://docs.pluralith.com/docs/category/cli-commands
-    project_path: "~/Code/Pluralith/test-architecture/aws/datalake/application"
-    terraform_vars: "{{ variable_dict }}"
+    command: "run" # See all available commands at https://docs.pluralith.com/docs/category/cli-commands
+    project_path: "YOUR PROJECT PATH HERE"
+    tf_vars: "{{ variable_dict }}"
 """
 
 RETURN = r"""
 # These are examples of possible return values, and in general should use other names for return values.
 original_message:
-    description: The original name param that was passed in.
+    description: Pluralith module start message.
     type: str
     returned: always
-    sample: 'hello world'
 message:
-    description: The output message that the test module generates.
+    description: Pluralith module complete message.
     type: str
     returned: always
-    sample: 'goodbye'
+command:
+    description: Pluralith command that has been run
+    type: str
+    returned: always
+state:
+    description: Returns various outputs
+    pluralith_output:
+        description: Raw Pluralith CLI output for the command that has been run
+        type: str
+        returned: on success
+    terraform_output:
+        description: Raw Terraform output for the init command
+        type: str
+        returned: on success
 """
 
 def run_pluralith():
     # Define available arguments/parameters a user can pass to the module
     module_args = dict(
         command=dict(type="str", required=True),
-        binary_path=dict(type="str", required=False),
+        api_key=dict(type="str", required=False),
+        project_id=dict(type="str", required=False),
         project_path=dict(type="str", required=True),
-        terraform_vars=dict(type="dict", required=False, default={}),
-        terraform_var_files=dict(aliases=["variables_file"], type="list", elements="path", default=[]),
+        tf_vars=dict(type="dict", required=False, default={}),
+        tf_var_files=dict(type="list", required=False, elements="path", default=[]),
+        init_tf=dict(type="bool", required=False, default=False),
+        tf_backend_config=dict(type="dict", required=False, default={}),
+        tf_backend_config_files=dict(type="list", required=False, elements="path", default=[]),
     )
 
     # Construct result object
@@ -93,14 +124,18 @@ def run_pluralith():
 
     # Extract argument values
     command = module.params.get("command")
+    api_key = module.params.get("api_key")
+    project_id = module.params.get("project_id")
     project_path = module.params.get("project_path")
-    terraform_vars = module.params.get('terraform_vars')
-    terraform_var_files = module.params.get('terraform_var_files')
+    tf_vars = module.params.get('tf_vars')
+    tf_var_files = module.params.get('tf_var_files')
+    init_tf = module.params.get('init_tf')
+    tf_backend_config = module.params.get('tf_backend_config')
+    tf_backend_config_files = module.params.get('tf_backend_config_files')
 
-    if module.params.get("binary_path") is not None:
-        bin_path = module.params.get("binary_path")
-    else:
-        bin_path = [module.get_bin_path("pluralith", required=True)][0]
+    # Get binary paths
+    pluralith_path = [module.get_bin_path("pluralith", required=True)][0]
+    terraform_path = [module.get_bin_path("terraform", required=True)][0]
 
     # if the user is working with this module in only check mode we do not
     # want to make any changes to the environment, just return the current
@@ -108,47 +143,55 @@ def run_pluralith():
     # if module.check_mode:
     #     module.exit_json(**result)
 
-    # manipulate or modify the state as needed (this is going to be the
-    # part where your module will do what it needs to do)
+    # Manipulate or modify the state as needed
     result["original_message"] = "starting pluralith " + module.params["command"]
     result["message"] = "pluralith " + module.params["command"] + " completed"
     result["command"] = module.params["command"]
-    result["state"] = {
-        "bin_path": bin_path,
-        "project_path": project_path,
-        "terraform_vars": terraform_vars,
-        "terraform_var_files": terraform_var_files,
-    }
 
-    executable = [bin_path, command]
-    executable += [f'--var="{key}={val}"' for key, val in terraform_vars.items()] # Construct variable flags
-    executable += [f'--var={var_file}' for var_file in terraform_var_files] # Construct variable file flags
-    result["state"]["executable"] = executable
+    # Initialize Terraform if applicable
+    if (init_tf):
+        # Construct Terraform init command
+        executable = [terraform_path, "init", "-no-color"]
+        executable += [f'-backend-config="{key}={val}"' for key, val in tf_backend_config.items()] # Construct backend config flags
+        executable += [f'-backend-config={var_file}' for var_file in tf_backend_config_files] # Construct backend config file flags
+        
+        # Run Terraform init command
+        rc, out, err = module.run_command(executable, cwd=project_path)
+        if rc == 0: # success, no changes
+            result["state"]["terraform_output"] = out
+        elif rc == 1: # failure
+            result["state"]["terraform_output"] = out
+            module.fail_json(msg='terraform init failed\r\nSTDOUT: {1}\r\n\r\nSTDERR: {2}'.format(out, err))
+        elif rc == 2: # success, with changes
+            result["state"]["terraform_output"] = out
 
+    # Construct Pluralith command
+    executable = [pluralith_path, command]
+
+    # Handle Pluralith init
+    if command == "init":
+        executable += [f'--api-key={api_key}']
+        executable += [f'--project-id={project_id}']
+
+    # Handle Pluralith graphing commands
+    if command != "init":
+        executable += [f'--var="{key}={val}"' for key, val in tf_vars.items()] # Construct variable flags
+        executable += [f'--var-file={var_file}' for var_file in tf_var_files] # Construct variable file flags
+
+    # Run Pluralith command
     rc, out, err = module.run_command(executable, cwd=project_path)
     if rc == 0: # success, no changes
-        result["state"]["output"] = out
+        result["state"]["pluralith_output"] = out
     elif rc == 1: # failure
-        result["state"]["output"] = out
+        result["state"]["pluralith_output"] = out
         module.fail_json(msg='pluralith {1} failed\r\nSTDOUT: {1}\r\n\r\nSTDERR: {2}'.format(command, out, err))
     elif rc == 2: # success, with changes
-        result["state"]["output"] = out
+        result["state"]["outpluralith_output"] = out
     
-
-    # during the execution of the module, if there is an exception or a
-    # conditional state that effectively causes a failure, run
-    # AnsibleModule.fail_json() to pass in the message and the result
-    # if module.params["name"] == "fail me":
-    #     module.fail_json(msg="You requested this to fail", **result)
-
-    # in the event of a successful module execution, you will want to
-    # simple AnsibleModule.exit_json(), passing the key/value results
     module.exit_json(**result)
-
 
 def main():
     run_pluralith()
-
 
 if __name__ == "__main__":
     main()
