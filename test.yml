@@ -1,8 +1,14 @@
 - name: Test Pluralith Module
   hosts: localhost
+  vars:
+    variable_dict:
+      datalake_region: "eu-central-1"
+      datalake_zone_letter: "a"
   tasks:
     - name: Run Pluralith
       pluralith:
-        command: "YOUR COMMAND HERE" # See all available commands here https://docs.pluralith.com/docs/category/cli-commands
-        project_path: "YOUR PROJECT PATH HERE"
-      register: testout
+        command: "graph" # See all available commands here https://docs.pluralith.com/docs/category/cli-commands
+        terraform_vars: "{{ variable_dict }}"
+      register: command_result
+    - debug:
+        var: command_result

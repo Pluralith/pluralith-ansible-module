@@ -1,38 +1,42 @@
 #!/usr/bin/python
 
-# Copyright: (c) 2018, Terry Jones <terry.jones@example.org>
-# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+# Copyright: (c) 2022, Pluralith Core Team <dan@pluralith.com>
 from __future__ import absolute_import, division, print_function
+from ansible.module_utils.basic import AnsibleModule
 
 __metaclass__ = type
 
 DOCUMENTATION = r"""
 ---
 module: pluralith
-
-short_description: An Ansible module to run Pluralith
-
-# If this is part of a collection, you need to use semantic versioning,
-# i.e. the version is of the form "2.5.0" and not "2.4".
 version_added: "0.0.1"
-
+short_description: An Ansible module to run Pluralith
 description: This is my longer description explaining my test module.
 
 options:
     command:
-        description: Select the Pluralith CLI command you would like to run
+        description: Select the Pluralith CLI command you would like to run.
         required: true
         type: str
-    # name:
-    #     description: This is the message to send to the test module.
-    #     required: true
-    #     type: str
-    # new:
-    #     description:
-    #         - Control to demo if the result of this module is changed or not.
-    #         - Parameter description can be a list as well.
-    #     required: false
-    #     type: bool
+    binary_path:
+        description: Path to the current Pluralith binary.
+        required: false
+        type: str
+    project_path:
+        description: Path to the target Terraform project.
+        required: true
+        type: str
+    terraform_vars:
+        description: A group of key-values to override template variables or those in variables files.
+        required: false
+        type: dict
+    terraform_var_files:
+        description: The path to a variables file for Terraform to fill into the TF configurations. This can accept a list of paths to multiple variables files.
+        required: false
+        type: list
+        elements: path
+        aliases: [ 'variables_file' ]
+
 # Specify this value according to your collection
 # in format of namespace.collection.doc_fragment_name
 extends_documentation_fragment:
@@ -47,11 +51,14 @@ EXAMPLES = r"""
 - name: Initialize a Pluralith project
   my_namespace.my_collection.pluralith:
     command: "init"
+    project_path: "~/Code/Pluralith/test-architecture/aws/datalake/application"
 
 # Run Pluralith and generate a diagram
 - name: Generate a Pluralith diagram
   my_namespace.my_collection.pluralith:
-    command: "run"
+    command: "run" # See all available commands here https://docs.pluralith.com/docs/category/cli-commands
+    project_path: "~/Code/Pluralith/test-architecture/aws/datalake/application"
+    terraform_vars: "{{ variable_dict }}"
 """
 
 RETURN = r"""
@@ -68,22 +75,17 @@ message:
     sample: 'goodbye'
 """
 
-from ansible.module_utils.basic import AnsibleModule
-
-
 def run_pluralith():
     # Define available arguments/parameters a user can pass to the module
     module_args = dict(
         command=dict(type="str", required=True),
         binary_path=dict(type="str", required=False),
         project_path=dict(type="str", required=True),
+        terraform_vars=dict(type="dict", required=False, default={}),
+        terraform_var_files=dict(aliases=["variables_file"], type="list", elements="path", default=[]),
     )
 
-    # seed the result dict in the object
-    # we primarily care about changed and state
-    # changed is if this module effectively modified the target
-    # state will include any data that you want your module to pass back
-    # for consumption, for example, in a subsequent task
+    # Construct result object
     result = dict(changed=False, state=dict(), original_message="", message="")
 
     # Initialize Ansible module
@@ -92,54 +94,45 @@ def run_pluralith():
     # Extract argument values
     command = module.params.get("command")
     project_path = module.params.get("project_path")
+    terraform_vars = module.params.get('terraform_vars')
+    terraform_var_files = module.params.get('terraform_var_files')
 
     if module.params.get("binary_path") is not None:
-        binary_path = module.params.get("binary_path")
+        bin_path = module.params.get("binary_path")
     else:
         bin_path = [module.get_bin_path("pluralith", required=True)][0]
 
     # if the user is working with this module in only check mode we do not
     # want to make any changes to the environment, just return the current
     # state with no modifications
-    if module.check_mode:
-        module.exit_json(**result)
+    # if module.check_mode:
+    #     module.exit_json(**result)
 
     # manipulate or modify the state as needed (this is going to be the
     # part where your module will do what it needs to do)
-    result["original_message"] = module.params["command"]
-    result["message"] = "goodbye"
-
-    # use whatever logic you need to determine whether or not this module
-    # made any modifications to your target
-    if module.params["command"] == "init":
-        result["state"] = {
-            "init": True,
-            "bin_path": bin_path,
-            "project_path": project_path,
-        }
-
-    if module.params["command"] == "run":
-        result["state"] = {
-            "run": True,
-            "bin_path": bin_path,
-            "project_path": project_path,
-        }
+    result["original_message"] = "starting pluralith " + module.params["command"]
+    result["message"] = "pluralith " + module.params["command"] + " completed"
+    result["command"] = module.params["command"]
+    result["state"] = {
+        "bin_path": bin_path,
+        "project_path": project_path,
+        "terraform_vars": terraform_vars,
+        "terraform_var_files": terraform_var_files,
+    }
 
     executable = [bin_path, command]
-    rc, out, err = module.run_command(executable, cwd=project_path)
+    executable += [f'--var="{key}={val}"' for key, val in terraform_vars.items()] # Construct variable flags
+    executable += [f'--var={var_file}' for var_file in terraform_var_files] # Construct variable file flags
+    result["state"]["executable"] = executable
 
-    if rc == 0:
-        # no changes
-        result["output"] = out
-        # return plan_path, False, out, err, plan_command if state == 'planned' else command
-    elif rc == 1:
-        # failure to plan
-        result["output"] = out
+    rc, out, err = module.run_command(executable, cwd=project_path)
+    if rc == 0: # success, no changes
+        result["state"]["output"] = out
+    elif rc == 1: # failure
+        result["state"]["output"] = out
         module.fail_json(msg='pluralith {1} failed\r\nSTDOUT: {1}\r\n\r\nSTDERR: {2}'.format(command, out, err))
-    elif rc == 2:
-        # changes, but successful
-        result["output"] = out
-        # return plan_path, True, out, err, plan_command if state == 'planned' else command
+    elif rc == 2: # success, with changes
+        result["state"]["output"] = out
     
 
     # during the execution of the module, if there is an exception or a
