@@ -39,7 +39,6 @@ Copy the below snippet as a starting point to run Pluralith with your Terraform 
       pluralith:
         command: "run" # See all available commands at https://docs.pluralith.com/docs/category/cli-commands
         project_path: "YOUR PROJECT PATH HERE"
-        export_pdf: true
         tf_vars: "{{ variable_dict }}"
       register: command_result
 ```
