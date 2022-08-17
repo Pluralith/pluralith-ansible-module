@@ -161,7 +161,7 @@ def run_pluralith():
             result["state"]["terraform_output"] = out
         elif rc == 1: # failure
             result["state"]["terraform_output"] = out
-            module.fail_json(msg='terraform init failed\r\nSTDOUT: {1}\r\n\r\nSTDERR: {2}'.format(out, err))
+            module.fail_json(msg=f'terraform init failed\r\nSTDOUT: {0}\r\n\r\nSTDERR: {1}'.format(out, err))
         elif rc == 2: # success, with changes
             result["state"]["terraform_output"] = out
 
