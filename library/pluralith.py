@@ -175,8 +175,8 @@ def run_pluralith():
 
     # Handle Pluralith graphing commands
     if command != "init":
-        executable += [f'--var="{key}={val}"' for key, val in tf_vars.items()] # Construct variable flags
-        executable += [f'--var-file={var_file}' for var_file in tf_var_files] # Construct variable file flags
+        executable += [f"--var={key}={val}" for key, val in tf_vars.items()] # Construct variable flags
+        executable += [f"--var-file={var_file}" for var_file in tf_var_files] # Construct variable file flags
 
     # Run Pluralith command
     rc, out, err = module.run_command(executable, cwd=project_path)
